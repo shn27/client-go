@@ -1,32 +1,16 @@
-/*
-Copyright 2016 The Kubernetes Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
-// Note: the example only works with the code within the same release/branch.
 package main
 
 import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	//
 	// Uncomment to load all auth plugins
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -38,7 +22,8 @@ import (
 )
 
 func main() {
-	kubeconfig := flag.String("kubeconfig", "/home/sohan/.kube/config", "location to your kubeconfig file")
+	namespace := "kubedb"
+	kubeconfig := flag.String("kubeconfig", "/home/sohan/.kube/sohan-kubeconfig.yaml", "location to your kubeconfig file")
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		// handle error
@@ -49,20 +34,26 @@ func main() {
 		}
 	}
 	clientset, err := kubernetes.NewForConfig(config)
+
 	for {
-		// get pods in all the namespaces by omitting namespace
-		// Or specify namespace to get pods in particular namespace
-		pods, err := clientset.CoreV1().Pods("default").List(context.Background(), metav1.ListOptions{})
+		//get pods in all the namespaces by omitting namespace
+		//Or specify namespace to get pods in particular namespace
+		pods, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{})
 		if err != nil {
-			panic(err.Error())
+			fmt.Printf("error %s, getting pods", err.Error())
 		}
 		fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
 
 		for _, pod := range pods.Items {
+			fmt.Println(getPodLogs(pod, config))
 			fmt.Println("%s", pod.Name)
 		}
 		fmt.Printf("Deployment are: \n")
-		deployments, err := clientset.AppsV1().Deployments("default").List(context.Background(), metav1.ListOptions{})
+		deployments, err := clientset.AppsV1().Deployments("demo").List(context.Background(), metav1.ListOptions{})
+
+		if err != nil {
+			fmt.Printf("error %s, getting pods", err.Error())
+		}
 
 		for _, dep := range deployments.Items {
 			fmt.Println("%s", dep.Name)
@@ -70,4 +61,47 @@ func main() {
 
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func intToPtr(x int64) *int64 {
+	return &x
+}
+
+func getPodLogs(pod v1.Pod, config *rest.Config) string {
+	fmt.Printf("hello world")
+	podLogOpts := v1.PodLogOptions{TailLines: intToPtr(10)} // For last 10 lines
+	//kubeconfig := flag.String("kubeconfig", "/home/sohan/.kube/config", "location to your kubeconfig file")
+	//config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	//if err != nil {
+	//	return "error in getting config"
+	//}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return "error in getting access to K8S"
+	}
+	req := clientset.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &podLogOpts)
+	podLogs, err := req.Stream(context.Background())
+	if err != nil {
+		return "error in opening stream"
+	}
+	defer podLogs.Close()
+
+	for {
+		buf := make([]byte, 2000)
+		numBytes, err := podLogs.Read(buf)
+		if err == io.EOF {
+			break
+		}
+		if numBytes == 0 {
+			continue
+		}
+
+		if err != nil {
+			return "err"
+		}
+		message := string(buf[:numBytes])
+		fmt.Print(message)
+	}
+	return "nil"
 }
